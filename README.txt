@@ -1,156 +1,125 @@
-#		Install Phytec Yocto PD23.1.0 for i.MX 8M plus on Ubuntu 22.04 host PC
-# Install in ~/phyLinux folder
-mkdir ~/phyLinux
-cd ~/phyLinux
-wget https://download.phytec.de/Software/Linux/Yocto/Tools/phyLinux
-# chmod +x phyLinux
-python phyLinux init
-#> colors: y
-#> 13: imx8mp
-#> 42: BSP-Yocto-NXP-i.MX8MP-PD23.1.0
-#> 5: phyboard-pollux-imx8mp-3: PHYTEC phyBOARD-Pollux i.MX8M Plus 1-4GB RAM
-#>                              target: phytec-qt6demo-image
-
-code build/conf/local.conf
-# change <user> to your user name in /home/ folder
-----------------------------------------
-# don't use ~ - use absolute paths
-DL_DIR ?= "/home/<user>/phyLinux/yocto_downloads"
-SSTATE_DIR ?= "/home/<user>/phyLinux/yocto_sstate"
-ACCEPT_FSL_EULA = "1"
-----------------------------------------
-
-mkdir ~/phyLinux/yocto_downloads
-mkdir ~/phyLinux/yocto_sstate
+#		Install Variscite Yocto PD23.1.0 for i.MX 8M plus on Ubuntu 22.04 host PC
 
 
-#		Initialize Yocto environment
-cd ~/phyLinux
-source sources/poky/oe-init-build-env
+#   Prepare Yocto
+# Host PC Ubuntu 22.04
+sudo apt install -y gawk wget git diffstat unzip texinfo gcc-multilib \
+  build-essential chrpath socat cpio python3 python3-pip python3-pexpect \
+  xz-utils debianutils iputils-ping libsdl1.2-dev xterm libyaml-dev libssl-dev \
+  autoconf libtool libglib2.0-dev libarchive-dev \
+  sed cvs subversion coreutils texi2html docbook-utils \
+  help2man make gcc g++ desktop-file-utils libgl1-mesa-dev libglu1-mesa-dev \
+  mercurial automake groff curl lzop asciidoc u-boot-tools dos2unix mtd-utils pv \
+  libncurses5 libncurses5-dev libncursesw5-dev libelf-dev zlib1g-dev bc rename \
+  zstd libgnutls28-dev pv
+sudo apt install -y python3-git liblz4-tool python3-jinja2 python3-subunit locales libacl1 python-is-python3
 
+git config --list
+git config --global user.name "<username>"
+git config --global user.email "<email>"
 
-#		Copy or download meta layer to Phytec Yocto PD23.1.0 for i.MX 8M plus
-# assume Phytec Yocto PD23.1.0 is in ~/phyLinux
-cd ~/phyLinux/sources/
-# mkdir -p ~/phyLinux/sources/meta-pco-ml/
-git clone https://github.com/jsjsjs000/imx8mp-phytec-yocto-machine-learning-image
-mv imx8mp-phytec-yocto-machine-learning-image/ meta-pco-ml/
-cd -
+curl https://commondatastorage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+chmod a+x ~/bin/repo
+export PATH=~/bin:$PATH
 
+#   optional: mount another disk (PCO PC Ubuntu)
+mkdir /mnt/ubuntu/
+sudo nano /etc/fstab
+# ----------------------------------------
+/dev/sdc6  /mnt/ubuntu  ext4  defaults  0  1
+# ----------------------------------------
+
+#   optional: symbolic link to other disk
+mkdir /mnt/ubuntu/var-fsl-yocto
+ln -s /mnt/ubuntu/var-fsl-yocto/ ~/var-fsl-yocto
+
+mkdir -p ~/var-fsl-yocto
+cd ~/var-fsl-yocto
+
+repo init -u https://github.com/varigit/variscite-bsp-platform.git -b kirkstone -m kirkstone-5.15.71-2.2.0.xml
+repo sync -j$(nproc)
+
+MACHINE=imx8mp-var-dart DISTRO=fslc-xwayland . var-setup-release.sh build_xwayland
+#> q, y, Enter
+
+#   Download and install Basler meta layers for cameras
+# https://variwiki.com/index.php?title=MX8_Basler_Camera&release=mx8mp-yocto-kirkstone-5.15.71_2.2.0-v1.3
+git clone https://github.com/varigit/meta-basler-imx8 -b kirkstone-5.15.71-2.2.0 ../sources/meta-basler-imx8
+git clone https://github.com/basler/meta-basler-tools -b kirkstone ../sources/meta-basler-tools
+
+nano conf/bblayers.conf
+# ----------------------------------------
+BBLAYERS += " ${BSPDIR}/sources/meta-basler-imx8 "
+BBLAYERS += " ${BSPDIR}/sources/meta-basler-tools "
+# ----------------------------------------
+
+nano conf/local.conf
+# ----------------------------------------
+ACCEPT_BASLER_EULA = "1"
+IMAGE_INSTALL:append = " packagegroup-dart-bcon-mipi"
+# ----------------------------------------
 
 #		Add meta layer to Yocto layers
+git clone https://github.com/jsjsjs000/imx8mp-phytec-yocto-machine-learning-image.git ../sources/meta-pco-ml
+
 code conf/bblayers.conf
 # ----------------------------------------
 BBLAYERS += "\
-  ${OEROOT}/../meta-pco-ml \
+  ${BSPDIR}/sources/meta-pco-ml \
 # ----------------------------------------
 
-
-#		Fix compilation problem: arm-compute-library_22.05.bb - PD23.1.0 - Ubuntu 22.04 host PC
-# when add packagegroup-imx-ml meta layer
-IMAGE_INSTALL += " packagegroup-imx-ml"
-
-code ../sources/poky/meta/classes/scons.bbclass
-# comment out:
-# EXTRA_OESCONS:append = " ${SCONS_MAXLINELENGTH}"
-# remove 3 times: PREFIX=${prefix} prefix=${prefix}
-
-
-#		Compile Yocto image
+#   Compile Yocto image
 bitbake pco-ml-image
 
+#   Setup Yocto environment for next time compile image
+cd ~/var-fsl-yocto
+source setup-environment build_xwayland
+bitbake pco-ml-image
 
-#		Write image to SD card
-# List SD card devices in your PC
+#   Write to SD card
+ll tmp/deploy/images/imx8mp-var-dart/pco-ml-image-imx8mp-var-dart.wic.gz
+ls tmp/work/imx8mp_var_dart-fslc-linux/pco-ml-image/1.0-r0/rootfs/
+
 lsblk -e7
-#> NAME                  MAJ:MIN RM   SIZE RO TYPE  MOUNTPOINTS
-#> mmcblk0               179:0    0  29,5G  0 disk                <------------ SD card in your PC
-#> ├─mmcblk0p1           179:1    0    65M  0 part  /media/user/boot
-#> └─mmcblk0p2           179:2    0   3,9G  0 part  /media/user/root
+#> sdd      8:48   1  59,5G  0 disk  # in this case /dev/sdd
 
-# Find your SD card in system - /dev/mmcblk0 in this case
-
-# Unmount SD card - Ubuntu by default mount SD card after plug in
 sync; umount /media/$USER/boot; umount /media/$USER/root
+sd_card=/dev/sdX  # <--------------------------- set your SD card - in this case /dev/sdd from lsblk
+zcat tmp/deploy/images/imx8mp-var-dart/pco-ml-image-imx8mp-var-dart.wic.gz | pv | sudo dd of=${sd_card} bs=1M conv=fsync; sync
 
-# Install progressbar program for dd
-sudo apt install -y pv
+#   Optional: Fix deny access to git tinycompress
+# alternative git for tinycompress
+# change: git://git.alsa-project.org/tinycompress
+# to: https://github.com/alsa-project/tinycompress.git
 
-# Write image to SD card in /dev/mmcblk0
-sudo pv -tpreb deploy/images/phyboard-pollux-imx8mp-3/pco-ml-image-phyboard-pollux-imx8mp-3.wic | sudo dd of=/dev/mmcblk0 bs=1M oflag=sync; sync
+nano ../sources/meta-freescale/recipes-multimedia/tinycompress/tinycompress_1.1.6.bb
+# ----------------------------------------
+# SRC_URI = "https://github.com/alsa-project/tinycompress.git;protocol=http
+SRC_URI[sha256sum] = "2cb5ad8d27a5a8896904a31fec99d91fde251bcbeb620b60e75a7bd49e6d9abd"
+SRC_URI = "https://github.com/alsa-project/tinycompress/archive/refs/tags/v${PV}.tar.gz \
+S = "${WORKDIR}/tinycompress-${PV}"
+# ----------------------------------------
 
-# Wait few minutes
-#> 981MiB 0:00:42 [24,3MiB/s] [====================>                                 ] 39% ETA 0:01:05
+#   Optional: Fix not enough RAM for nodejs (16 CPU cores / 16GB RAM)
+nano conf/local.conf
+# ----------------------------------------
+PARALLEL_MAKE = "-j 4"     # maximum CPU cores
+# BB_NUMBER_THREADS = "4"  # maximum paralell Yocto tasks
+# ----------------------------------------
 
-# After finish write image to SD card
-#> coppied 2634668032 bytes (2,6 GB, 2,5 GiB), 106,465 s, 24,7 MB/s
+#   Set static IP address
+ifconfig eth0 192.168.3.11  # set temporary IP address
 
-# Remove SD card from reader
-# Insert SD card to Phytec i.MX 8M Plus devboard
-# Set devboard i.MX boot source on DIP switch (near USB Debug connector, reset and power switch - left bottom corner)
-#   set as SD card: 1000 (1: ON 2: OFF 3: OFF 4: OFF)
-# Connect 2 cameras Phytec VM-017 AR0521 to CSI1 and CSI2 connector
-# Connect Ethernet cable to RJ-45 connector
-# Connect any FullHD monitor to HDMI connector
-# Optional: connect mouse and keyboard to USB ports
-# Optional: connect microUSB to USB Debug connector - Linux serial debug console
-#           connect by Ubuntu Terminal command: minicom -w -D /dev/ttyUSB0  # 115200 b/s
+ssh root@192.168.3.11       # connect to i.MX via SSH
 
-# Connect 12V to devboard - power on devboard (ON/OFF switch)
-# Wait 20 seconds for start up Linux
+# https://variwiki.com/index.php?title=Static_IP_Address#Using_NetworkManager
+nmcli con add type ethernet ifname eth0 con-name static-eth0 ip4 192.168.3.11/24 gw4 192.168.3.10
+nmcli con mod static-eth0 ipv4.dns "10.0.5.1"
+nmcli con up static-eth0
 
-# Set your Ethernet card in PC: IP: 192.168.3.10, Mask: 255.255.255.0
-# Connect to devboard by SSH - IP: 192.168.3.11
-ssh root@192.168.3.11
-# User: root, password: <empty>
+cat /etc/NetworkManager/system-connections/static-eth0.nmconnection
 
-# Test GStreamer
-gst-launch-1.0 videotestsrc ! ximagesink display=:0
-# Press: Ctrl+C to abort
+# not tested - or reboot
+systemctl restart systemd-networkd
+journalctl --unit=systemd-networkd.service
 
-# Check file /boot/bootenv.txt - for 2 cameras AR0521
-# overlays=imx8mp-isi-csi1.dtbo imx8mp-vm017-csi1.dtbo imx8mp-isi-csi2.dtbo imx8mp-vm017-csi2.dtbo
-
-# Setup 2 cameras resolution
-setup-pipeline-csi1 -f SGRBG8_1X8 -s 1920x1080 -o '(336,432)' -c 1920x1080
-setup-pipeline-csi2 -f SGRBG8_1X8 -s 1920x1080 -o '(336,432)' -c 1920x1080
-
-# Setup camera brightness (camera exposition and gain)
-v4l2-ctl -d /dev/cam-csi1 -c exposure=3000,analogue_gain=8000,digital_gain_red=1400,digital_gain_blue=1400,dynamic_defect_pixel_correction=1
-v4l2-ctl -d /dev/cam-csi2 -c exposure=3000,analogue_gain=8000,digital_gain_red=1400,digital_gain_blue=1400,dynamic_defect_pixel_correction=1
-
-# Test camera 1 on GStreamer
-gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-bayer,format=grbg,depth=8,width=1920,height=1080,framerate=60/1,pixel-aspect-ratio=1/1 ! bayer2rgbneon ! ximagesink display=:0 sync=false
-# Press: Ctrl+C to abort
-
-# Test camera 2 on GStreamer
-gst-launch-1.0 -v v4l2src device=/dev/video1 ! video/x-bayer,format=grbg,depth=8,width=1920,height=1080,framerate=60/1,pixel-aspect-ratio=1/1 ! bayer2rgbneon ! ximagesink display=:0 sync=false
-# Press: Ctrl+C to abort
-
-# Test camera 1 on GStreamer with display FPS
-gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-bayer,format=grbg,depth=8,width=1920,height=1080,framerate=60/1,pixel-aspect-ratio=1/1 ! bayer2rgbneon ! fpsdisplaysink sync=false
-# Press: Ctrl+C to abort
-
-# Composite 2 streams: camera1 60fps + camera2 60fps, result 60fps - CPU 1.5-2 cores (150-200%)
-gst-launch-1.0 imxcompositor_g2d name=comp sink_1::xpos=0 sink_1::ypos=0 sink_1::alpha=0.5 ! \
-  waylandsink window-width=1920 window-height=1080 \
-  v4l2src device=/dev/video0 ! video/x-bayer,format=grbg,depth=8,width=1920,height=1080,framerate=60/1,pixel-aspect-ratio=1/1 ! bayer2rgbneon ! comp.sink_0 \
-  v4l2src device=/dev/video1 ! video/x-bayer,format=grbg,depth=8,width=1920,height=1080,framerate=60/1,pixel-aspect-ratio=1/1 ! bayer2rgbneon ! comp.sink_1
-
-# Composite 2 streams: camera1 60fps + camera2 60fps, result 60fps - CPU 1.5-2 cores (150-200%)
-gst-launch-1.0 imxcompositor_g2d name=comp \
-  sink_0::xpos=0 sink_0::ypos=0 sink_0::width=960 sink_0::height=540 \
-	sink_1::xpos=960 sink_1::ypos=0 sink_1::width=960 sink_1::height=540 ! \
-  waylandsink window-width=1920 window-height=1080 \
-  v4l2src device=/dev/video0 ! video/x-bayer,format=grbg,depth=8,width=1920,height=1080,framerate=60/1,pixel-aspect-ratio=1/1 ! bayer2rgbneon ! comp.sink_0 \
-  v4l2src device=/dev/video1 ! video/x-bayer,format=grbg,depth=8,width=1920,height=1080,framerate=60/1,pixel-aspect-ratio=1/1 ! bayer2rgbneon ! comp.sink_1
-
-# Power off devboard Linux command
-poweroff
-
-# More information - Phytec documentation:
-# https://www.phytec.eu/en/produkte/single-board-computer/phyboard-pollux/#downloads/
-# https://phytec.github.io/doc-bsp-yocto/bsp/imx8/imx8mp/pd23.1.0.html
-# https://www.phytec.de/cdocuments/?doc=d4A0G
-# https://www.phytec.de/cdocuments/?doc=IoBsLg
-# https://www.phytec.de/cdocuments/?doc=l4CqLw
