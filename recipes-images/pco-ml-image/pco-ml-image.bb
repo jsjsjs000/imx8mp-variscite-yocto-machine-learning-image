@@ -54,6 +54,7 @@ IMAGE_INSTALL:append = "\
 	opencv opencv-samples opencv-apps python3-opencv \
 	gstreamer1.0 gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
 	pco-ml \
+	proftpd uftp vsftpd \
 "
 #   gstreamer1.0-plugins-bad-opencv
 
